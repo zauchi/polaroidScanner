@@ -3,6 +3,7 @@ import numpy as np
 from PIL import Image, ImageEnhance
 import subprocess
 import os
+import glob
 
 def order_points(pts):
     rect = np.zeros((4, 2), dtype="float32")
@@ -59,49 +60,56 @@ def enhance_image(pil_img, contrast=1.3, color=1.3, sharpness=1.2):
     return pil_img
 
 # --- Einstellungen ---
-image_path = "N://EPSCAN//001//EPSON021.JPG"
-output_base = "N://EPSCAN//001//"
-tmp_folder = "N://EPSCAN//001//tmp_polaroids"
-output_folder = "N://EPSCAN//001//output_polaroids"
-realesrgan_path = r"C://tools//realesrgan-ncnn-vulkan//realcugan-ncnn-vulkan.exe"
+input_folder = r"N:\EPSCAN\001"
+tmp_folder = os.path.join(input_folder, "tmp_polaroids")
+output_folder = os.path.join(input_folder, "output_polaroids")
+realesrgan_path = r"C:\tools\realesrgan-ncnn-vulkan\realcugan-ncnn-vulkan.exe"
 
 os.makedirs(tmp_folder, exist_ok=True)
 os.makedirs(output_folder, exist_ok=True)
 
-img = cv2.imread(image_path)
-gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-blur = cv2.GaussianBlur(gray, (7,7), 0)
-_, thresh = cv2.threshold(blur, 220, 255, cv2.THRESH_BINARY_INV)
-contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+# Alle passenden Bilddateien finden (JPG, JPEG, PNG)
+input_files = glob.glob(os.path.join(input_folder, "*.jpg")) + \
+              glob.glob(os.path.join(input_folder, "*.jpeg")) + \
+              glob.glob(os.path.join(input_folder, "*.png"))
 
-polaroid_num = 1
-for cnt in contours:
-    area = cv2.contourArea(cnt)
-    if area < 10000:
-        continue
-    rect = cv2.minAreaRect(cnt)
-    box = cv2.boxPoints(rect)
-    box = np.int0(box)
-    warped = four_point_transform(img, box)
-    warped_oriented = orient_polaroid(warped)
-    polaroid_pil = Image.fromarray(cv2.cvtColor(warped_oriented, cv2.COLOR_BGR2RGB))
-    polaroid_pil = enhance_image(polaroid_pil,
-                                 contrast=1,
-                                 color=1,
-                                 sharpness=1)
-    tmp_jpg = os.path.join(tmp_folder, f"{output_base}_{polaroid_num}.jpg")
-    upscale_jpg = os.path.join(output_folder, f"{output_base}_{polaroid_num}.jpg")
-    polaroid_pil.save(tmp_jpg, quality=95)
-    # --- Real-ESRGAN upscaling als EXTERNER PROZESS ---
-    subprocess.run([
-        realesrgan_path,
-        "-i", tmp_jpg,
-        "-o", upscale_jpg,
-        "-n", "-1", # Denoise
-        "-s", "2",  # 2-fach Upscaling
-        "-g", "0" # Using GPU 0
-    ], check=True)
-    print(f"Polaroid {polaroid_num} gespeichert und hochskaliert!")
-    polaroid_num += 1
+for image_path in input_files:
+    basename = os.path.splitext(os.path.basename(image_path))[0]
+    print(f"Starte Verarbeitung von {image_path} ...")
+    img = cv2.imread(image_path)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    blur = cv2.GaussianBlur(gray, (7,7), 0)
+    _, thresh = cv2.threshold(blur, 220, 255, cv2.THRESH_BINARY_INV)
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    polaroid_num = 1
+    for cnt in contours:
+        area = cv2.contourArea(cnt)
+        if area < 10000:
+            continue
+        rect = cv2.minAreaRect(cnt)
+        box = cv2.boxPoints(rect)
+        box = np.int0(box)
+        warped = four_point_transform(img, box)
+        warped_oriented = orient_polaroid(warped)
+        polaroid_pil = Image.fromarray(cv2.cvtColor(warped_oriented, cv2.COLOR_BGR2RGB))
+        polaroid_pil = enhance_image(polaroid_pil,
+                                     contrast=1.1, # ggf. anpassen
+                                     color=1.3,
+                                     sharpness=1.0)
+        # Dateiname nach Muster: BASENAME_N.jpg
+        tmp_jpg = os.path.join(tmp_folder, f"{basename}_{polaroid_num}.jpg")
+        upscale_jpg = os.path.join(output_folder, f"{basename}_{polaroid_num}.jpg")
+        polaroid_pil.save(tmp_jpg, quality=95)
+        # --- Real-ESRGAN/RealCUGAN upscaling als EXTERNER PROZESS ---
+        subprocess.run([
+            realesrgan_path,
+            "-i", tmp_jpg,
+            "-o", upscale_jpg,
+            "-n", "-1", # ggf. Modellname oder Denoise
+            "-s", "2",  # 2-fach Upscaling
+            "-g", "0"
+        ], check=True)
+        print(f"{basename}_{polaroid_num}.jpg gespeichert und hochskaliert!")
+        polaroid_num += 1
 
-print(f"Fertig! Alle Polaroids erkannt, upgescaled und im Ordner {output_folder} gespeichert.")
+print(f"Fertig! Alle Scans und Polaroids verarbeitet und hochskaliert!")
