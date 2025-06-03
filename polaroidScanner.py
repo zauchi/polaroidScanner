@@ -2,8 +2,8 @@ import cv2
 import numpy as np
 from PIL import Image, ImageEnhance
 
+# --- Hilfsfunktionen für Perspektivkorrektur und Orientierung ---
 def order_points(pts):
-    # wie gehabt
     rect = np.zeros((4, 2), dtype="float32")
     s = pts.sum(axis=1)
     rect[0] = pts[np.argmin(s)]
@@ -14,7 +14,6 @@ def order_points(pts):
     return rect
 
 def four_point_transform(image, pts):
-    # wie gehabt
     rect = order_points(pts)
     (tl, tr, br, bl) = rect
     widthA = np.linalg.norm(br - bl)
@@ -33,13 +32,11 @@ def four_point_transform(image, pts):
     return warped
 
 def orient_polaroid(warped_img):
-    # Jetzt sicher: immer mit der dicksten weißen Kante UNTEN!
     best_img = warped_img
     max_white = -1
     for i in range(4):
         h = warped_img.shape[0]
         bottom_strip = warped_img[int(h*0.80):, :]
-        # Farb-zu-Grau, falls Bild bunt ist
         if len(bottom_strip.shape) == 3:
             strip_gray = cv2.cvtColor(bottom_strip, cv2.COLOR_BGR2GRAY)
         else:
@@ -52,20 +49,24 @@ def orient_polaroid(warped_img):
     return best_img
 
 def enhance_image(pil_img, contrast=1.3, color=1.3, sharpness=1.2):
-    # Kontrast erhöhen
     enhancer = ImageEnhance.Contrast(pil_img)
     pil_img = enhancer.enhance(contrast)
-    # Sättigung erhöhen
     enhancer = ImageEnhance.Color(pil_img)
     pil_img = enhancer.enhance(color)
-    # Schärfe erhöhen
     enhancer = ImageEnhance.Sharpness(pil_img)
     pil_img = enhancer.enhance(sharpness)
     return pil_img
 
+# --- Einstellungen ---
 image_path = "N://EPSCAN//001//EPSON021.JPG"
-output_base = "N://EPSCAN//001//" + image_path
+output_base = "N://EPSCAN//001//" + image_path + "x2"
+model_path = "D://Google schreinersgarage@gmail.com//Dokumente//polaroidScanner//EDSR_Tensorflow-master//models//EDSR_x4.pb"
+# --- Lade das EDSR Super-Resolution Modell ---
+sr = cv2.dnn_superres.DnnSuperResImpl_create()
+sr.readModel(model_path)
+sr.setModel("edsr", 4)  # 2-fach Upscaling
 
+# --- Lade das große Bild und suche Polaroids ---
 img = cv2.imread(image_path)
 gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 blur = cv2.GaussianBlur(gray, (7,7), 0)
@@ -80,17 +81,21 @@ for cnt in contours:
     rect = cv2.minAreaRect(cnt)
     box = cv2.boxPoints(rect)
     box = np.int0(box)
+    # Perspektivkorrektur & Orientierung
     warped = four_point_transform(img, box)
     warped_oriented = orient_polaroid(warped)
-    polaroid_pil = Image.fromarray(cv2.cvtColor(warped_oriented, cv2.COLOR_BGR2RGB))
-    
-    # >>> HIER BILD ENHANCEN <<<
+    # Super-Resolution (EDSR Upscale)
+    result = sr.upsample(warped_oriented)
+    # In PIL-Objekt für weitere Verarbeitung
+    polaroid_pil = Image.fromarray(cv2.cvtColor(result, cv2.COLOR_BGR2RGB))
+    # Bild verbessern
     polaroid_pil = enhance_image(polaroid_pil,
-                                 contrast=1.3,   # 1.0 = unverändert, >1 erhöht
-                                 color=1.3,      # 1.0 = unverändert, >1 erhöht Sättigung
-                                 sharpness=1.2)  # 1.0 = unverändert, >1 erhöht
-
-    polaroid_pil.save(f"{output_base}_{polaroid_num}.jpg")
+                                 contrast=1.3,
+                                 color=1.3,
+                                 sharpness=1.2)
+    # Speichern
+    polaroid_pil.save(f"{output_base}_{polaroid_num}.jpg", quality=95)
+    print(f"Polaroid {polaroid_num} gespeichert!")
     polaroid_num += 1
 
-print(f"{polaroid_num-1} Polaroids erkannt, gerichtet, verbessert und gespeichert!")
+print(f"Fertig! {polaroid_num-1} Polaroids erkannt, skaliert, verbessert und gespeichert.")
