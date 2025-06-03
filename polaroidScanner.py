@@ -1,8 +1,9 @@
 import cv2
 import numpy as np
 from PIL import Image, ImageEnhance
+import subprocess
+import os
 
-# --- Hilfsfunktionen für Perspektivkorrektur und Orientierung ---
 def order_points(pts):
     rect = np.zeros((4, 2), dtype="float32")
     s = pts.sum(axis=1)
@@ -59,14 +60,14 @@ def enhance_image(pil_img, contrast=1.3, color=1.3, sharpness=1.2):
 
 # --- Einstellungen ---
 image_path = "N://EPSCAN//001//EPSON021.JPG"
-output_base = "N://EPSCAN//001//" + image_path + "x2"
-model_path = "D://Google schreinersgarage@gmail.com//Dokumente//polaroidScanner//EDSR_Tensorflow-master//models//EDSR_x4.pb"
-# --- Lade das EDSR Super-Resolution Modell ---
-sr = cv2.dnn_superres.DnnSuperResImpl_create()
-sr.readModel(model_path)
-sr.setModel("edsr", 4)  # 2-fach Upscaling
+output_base = "N://EPSCAN//001//"
+tmp_folder = "N://EPSCAN//001//tmp_polaroids"
+output_folder = "N://EPSCAN//001//output_polaroids"
+realesrgan_path = r"C://tools//realesrgan-ncnn-vulkan//realcugan-ncnn-vulkan.exe"
 
-# --- Lade das große Bild und suche Polaroids ---
+os.makedirs(tmp_folder, exist_ok=True)
+os.makedirs(output_folder, exist_ok=True)
+
 img = cv2.imread(image_path)
 gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 blur = cv2.GaussianBlur(gray, (7,7), 0)
@@ -81,21 +82,26 @@ for cnt in contours:
     rect = cv2.minAreaRect(cnt)
     box = cv2.boxPoints(rect)
     box = np.int0(box)
-    # Perspektivkorrektur & Orientierung
     warped = four_point_transform(img, box)
     warped_oriented = orient_polaroid(warped)
-    # Super-Resolution (EDSR Upscale)
-    result = sr.upsample(warped_oriented)
-    # In PIL-Objekt für weitere Verarbeitung
-    polaroid_pil = Image.fromarray(cv2.cvtColor(result, cv2.COLOR_BGR2RGB))
-    # Bild verbessern
+    polaroid_pil = Image.fromarray(cv2.cvtColor(warped_oriented, cv2.COLOR_BGR2RGB))
     polaroid_pil = enhance_image(polaroid_pil,
-                                 contrast=1.3,
-                                 color=1.3,
-                                 sharpness=1.2)
-    # Speichern
-    polaroid_pil.save(f"{output_base}_{polaroid_num}.jpg", quality=95)
-    print(f"Polaroid {polaroid_num} gespeichert!")
+                                 contrast=1,
+                                 color=1,
+                                 sharpness=1)
+    tmp_jpg = os.path.join(tmp_folder, f"{output_base}_{polaroid_num}.jpg")
+    upscale_jpg = os.path.join(output_folder, f"{output_base}_{polaroid_num}.jpg")
+    polaroid_pil.save(tmp_jpg, quality=95)
+    # --- Real-ESRGAN upscaling als EXTERNER PROZESS ---
+    subprocess.run([
+        realesrgan_path,
+        "-i", tmp_jpg,
+        "-o", upscale_jpg,
+        "-n", "-1", # Denoise
+        "-s", "2",  # 2-fach Upscaling
+        "-g", "0" # Using GPU 0
+    ], check=True)
+    print(f"Polaroid {polaroid_num} gespeichert und hochskaliert!")
     polaroid_num += 1
 
-print(f"Fertig! {polaroid_num-1} Polaroids erkannt, skaliert, verbessert und gespeichert.")
+print(f"Fertig! Alle Polaroids erkannt, upgescaled und im Ordner {output_folder} gespeichert.")

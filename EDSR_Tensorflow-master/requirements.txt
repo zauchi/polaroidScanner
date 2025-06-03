@@ -1,5 +1,0 @@
-numpy
-opencv-python
-tensorflow==1.14.0
-Pillow
-scikit-image
