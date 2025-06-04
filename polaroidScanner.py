@@ -32,12 +32,14 @@ def four_point_transform(image, pts):
     heightA = np.linalg.norm(tr - br)
     heightB = np.linalg.norm(tl - bl)
     maxHeight = int(max(heightA, heightB))
+
     # Coordinates of the new rectangle
     dst = np.array([
         [0, 0],
         [maxWidth - 1, 0],
         [maxWidth - 1, maxHeight - 1],
         [0, maxHeight - 1]], dtype="float32")
+    
     # Calculate the perspective transform matrix and apply it
     M = cv2.getPerspectiveTransform(rect, dst)
     warped = cv2.warpPerspective(image, M, (maxWidth, maxHeight))
@@ -53,8 +55,10 @@ def orient_polaroid(warped_img):
     max_white = -1
     for i in range(4):
         h = warped_img.shape[0]
+
         # Get bottom 20% strip of the image
         bottom_strip = warped_img[int(h*0.80):, :]
+
         # Convert to grayscale for analysis
         if len(bottom_strip.shape) == 3:
             strip_gray = cv2.cvtColor(bottom_strip, cv2.COLOR_BGR2GRAY)
@@ -64,6 +68,7 @@ def orient_polaroid(warped_img):
         if white_score > max_white:
             max_white = white_score
             best_img = warped_img.copy()
+
         # Rotate 90 degrees for next test
         warped_img = np.rot90(warped_img)
     return best_img
@@ -106,8 +111,10 @@ for image_path in input_files:
     # Preprocess: convert to grayscale and blur to reduce noise
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     blur = cv2.GaussianBlur(gray, (7,7), 0)
+
     # Thresholding: make background white, polaroids black
     _, thresh = cv2.threshold(blur, 220, 255, cv2.THRESH_BINARY_INV)
+    
     # Find contours (external only)
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     polaroid_num = 1
